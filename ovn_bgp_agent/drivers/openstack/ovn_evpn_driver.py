@@ -25,6 +25,7 @@ from ovn_bgp_agent.drivers import driver_api
 from ovn_bgp_agent.drivers.openstack.utils import frr
 from ovn_bgp_agent.drivers.openstack.utils import ovn
 from ovn_bgp_agent.drivers.openstack.utils import ovs
+from ovn_bgp_agent.drivers.openstack.watchers import bgp_watcher
 from ovn_bgp_agent.drivers.openstack.watchers import evpn_watcher as \
     watcher
 from ovn_bgp_agent.utils import helpers
@@ -91,8 +92,8 @@ class OVNEVPNDriver(driver_api.AgentDriverBase):
                 watcher.SubnetRouterDetachedEvent(self),
                 watcher.TenantPortCreatedEvent(self),
                 watcher.TenantPortDeletedEvent(self),
-                watcher.ChassisCreateEvent(self),
-                watcher.ChassisPrivateCreateEvent(self),
+                bgp_watcher.ChassisCreateEvent(self),
+                bgp_watcher.ChassisPrivateCreateEvent(self),
                 watcher.LocalnetCreateDeleteEvent(self)}
 
     @lockutils.synchronized('evpn')
