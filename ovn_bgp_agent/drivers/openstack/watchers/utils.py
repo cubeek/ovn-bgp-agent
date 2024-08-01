@@ -15,3 +15,10 @@
 
 def has_ip_address_defined(address):
     return ' ' in address.strip()
+
+
+def get_from_external_ids(row, key):
+    try:
+        return row.external_ids[key]
+    except (AttributeError, KeyError):
+        pass

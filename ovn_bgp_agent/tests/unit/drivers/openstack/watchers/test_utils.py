@@ -15,6 +15,7 @@
 
 from ovn_bgp_agent.drivers.openstack.watchers import utils
 from ovn_bgp_agent.tests import base as test_base
+from ovn_bgp_agent.tests import utils as test_utils
 
 
 class TestHasIpAddressDefined(test_base.TestCase):
@@ -35,3 +36,23 @@ class TestHasIpAddressDefined(test_base.TestCase):
         self.assertTrue(
             utils.has_ip_address_defined(
                 'aa:bb:cc:dd:ee:ff 10.10.1.16 10.10.1.17 10.10.1.18'))
+
+
+class TestGetFromExternalIds(test_base.TestCase):
+    def test_all_present(self):
+        key = 'foo'
+        value = 'bar'
+        row = test_utils.create_row(external_ids={key: value})
+
+        observed_value = utils.get_from_external_ids(row, key)
+        self.assertEqual(value, observed_value)
+
+    def test_external_ids_missing(self):
+        row = test_utils.create_row()
+
+        self.assertIsNone(utils.get_from_external_ids(row, 'key'))
+
+    def test_key_missing(self):
+        row = test_utils.create_row(external_ids={})
+
+        self.assertIsNone(utils.get_from_external_ids(row, 'key'))
