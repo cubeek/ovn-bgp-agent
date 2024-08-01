@@ -717,9 +717,9 @@ class OVNLBCreateEvent(base_watcher.OVNLBEvent):
         diff = self._get_diff_ip_from_vips(row, old)
         for ip in diff:
             with _SYNC_STATE_LOCK.read_lock():
-                if self._is_vip(row, ip):
+                if utils.is_lb_vip(row, ip):
                     self.agent.expose_ovn_lb_vip(row)
-                elif self._is_fip(row, ip):
+                elif utils.is_lb_fip(row, ip):
                     self.agent.expose_ovn_lb_fip(row)
 
         # router set ext-gw
@@ -781,9 +781,9 @@ class OVNLBDeleteEvent(base_watcher.OVNLBEvent):
             diff = self._get_ip_from_vips(row)
             for ip in diff:
                 with _SYNC_STATE_LOCK.read_lock():
-                    if self._is_vip(row, ip):
+                    if utils.is_lb_vip(row, ip):
                         self.agent.withdraw_ovn_lb_vip(row)
-                    elif self._is_fip(row, ip):
+                    elif utils.is_lb_fip(row, ip):
                         self.agent.withdraw_ovn_lb_fip(row)
             return
 
@@ -792,9 +792,9 @@ class OVNLBDeleteEvent(base_watcher.OVNLBEvent):
         diff = self._get_diff_ip_from_vips(old, row)
         for ip in diff:
             with _SYNC_STATE_LOCK.read_lock():
-                if self._is_vip(old, ip):
+                if utils.is_lb_vip(old, ip):
                     self.agent.withdraw_ovn_lb_vip(old)
-                elif self._is_fip(old, ip):
+                elif utils.is_lb_fip(old, ip):
                     self.agent.withdraw_ovn_lb_fip(old)
 
         # router unset ext-gw

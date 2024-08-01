@@ -33,3 +33,41 @@ def get_router_from_external_ids(row, key=constants.OVN_LB_LR_REF_EXT_ID_KEY):
         return router_name.replace('neutron-', "", 1)
     except AttributeError:
         pass
+
+
+def get_vips_from_lb(lb):
+    """Return a set of vips from a Load_Balancer row
+
+    Note: As LB VIP contains a port (e.g., '192.168.1.1:80'), the port part
+          is removed.
+    """
+    return {driver_utils.remove_port_from_ip(ipport)
+            for ipport in getattr(row, 'vips', {})}
+
+
+def _get_diff_ip_from_vips(self, new, old):
+    "Return a set of IPs that are present in 'new' but not in 'old'"
+    return get_vips_from_lb(new) - get_vips_from_lb(old)
+
+
+def _ip_matches_in_row(row, ip, key):
+    """Return True if given ip is in external_ids under given key.
+
+    Return also True if passed ip is None and key is not present.
+
+    Return None if external_ids is not present in row.
+
+    Otherwise return False
+    """
+    try:
+        return ip == row.external_ids.get(key)
+    except AttributeError:
+        pass
+
+
+def is_lb_vip(row, ip):
+    return _ip_matches_in_row(row, ip, constants.OVN_LB_VIP_IP_EXT_ID_KEY)
+
+
+def is_lb_fip(row, ip):
+    return _ip_matches_in_row(row, ip, constants.OVN_LB_VIP_FIP_EXT_ID_KEY)

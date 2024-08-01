@@ -26,52 +26,6 @@ class FakePortBindingChassisEvent(base_watcher.PortBindingChassisEvent):
         pass
 
 
-class FakeOVNLBEvent(base_watcher.OVNLBEvent):
-    def run(self):
-        pass
-
-
-class TestOVNLBEvent(test_base.TestCase):
-
-    def setUp(self):
-        super(TestOVNLBEvent, self).setUp()
-        self.ovnlb_event = FakeOVNLBEvent(
-            mock.Mock(), [mock.Mock()])
-
-    def test__is_vip(self):
-        row = utils.create_row(
-            external_ids={constants.OVN_LB_VIP_IP_EXT_ID_KEY: '192.168.1.50',
-                          constants.OVN_LB_VIP_FIP_EXT_ID_KEY: '172.24.4.5'},
-            vips={'192.168.1.50:80': '192.168.1.100:80',
-                  '172.24.4.5:80': '192.168.1.100:80'})
-        self.assertFalse(self.ovnlb_event._is_vip(row, '172.24.4.5'))
-        self.assertTrue(self.ovnlb_event._is_vip(row, '192.168.1.50'))
-        row = utils.create_row(external_ids={})
-        self.assertFalse(self.ovnlb_event._is_vip(row, '172.24.4.5'))
-        self.assertFalse(self.ovnlb_event._is_vip(row, '192.168.1.50'))
-
-    def test__is_fip(self):
-        row = utils.create_row(
-            external_ids={constants.OVN_LB_VIP_IP_EXT_ID_KEY: '192.168.1.50',
-                          constants.OVN_LB_VIP_FIP_EXT_ID_KEY: '172.24.4.5'},
-            vips={'192.168.1.50:80': '192.168.1.100:80',
-                  '172.24.4.5:80': '192.168.1.100:80'})
-        self.assertTrue(self.ovnlb_event._is_fip(row, '172.24.4.5'))
-        self.assertFalse(self.ovnlb_event._is_fip(row, '192.168.1.50'))
-        row = utils.create_row(external_ids={})
-        self.assertFalse(self.ovnlb_event._is_fip(row, '172.24.4.5'))
-        self.assertFalse(self.ovnlb_event._is_fip(row, '192.168.1.50'))
-
-    def test__get_ip_from_vips(self):
-        row = utils.create_row(
-            external_ids={constants.OVN_LB_VIP_IP_EXT_ID_KEY: '192.168.1.50',
-                          constants.OVN_LB_VIP_FIP_EXT_ID_KEY: '172.24.4.5'},
-            vips={'192.168.1.50:80': '192.168.1.100:80',
-                  '172.24.4.5:80': '192.168.1.100:80'})
-        self.assertEqual(self.ovnlb_event._get_ip_from_vips(row),
-                         ['192.168.1.50', '172.24.4.5'])
-
-
 class FakeLogicalSwitchChassisEvent(base_watcher.LogicalSwitchChassisEvent):
     def run(self):
         pass

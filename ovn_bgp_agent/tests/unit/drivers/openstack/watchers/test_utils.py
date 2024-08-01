@@ -100,3 +100,52 @@ class TestGetRouterFromExternalIds(test_base.TestCase):
         router = utils.get_router_from_external_ids(row)
 
         self.assertEqual(expected_router, router)
+
+
+class Test_IpMatchesInRow(test_base.TestCase):
+    def test_ip_is_in_row(self):
+        ip = 'ip'
+        key = 'key'
+        row = test_utils.create_row(external_ids={
+            key: ip})
+
+        self.assertTrue(utils._ip_matches_in_row(row, ip, key))
+
+    def test_external_ids_missing_returns_none(self):
+        ip = 'ip'
+        key = 'key'
+        row = test_utils.create_row()
+
+        self.assertIsNone(utils._ip_matches_in_row(row, ip, key))
+
+    def test_key_missing(self):
+        ip = 'ip'
+        key = 'key'
+        row = test_utils.create_row(external_ids={})
+
+        self.assertFalse(utils._ip_matches_in_row(row, ip, key))
+
+    def test_key_missing_but_ip_is_none(self):
+        ip = None
+        key = 'key'
+        row = test_utils.create_row(external_ids={})
+
+        self.assertTrue(utils._ip_matches_in_row(row, ip, key))
+
+
+class TestIsLbVip(test_base.TestCase):
+    def test_is_lb_vip(self):
+        ip = 'ip'
+        row = test_utils.create_row(
+            external_ids={constants.OVN_LB_VIP_IP_EXT_ID_KEY: ip})
+
+        self.assertTrue(utils.is_lb_vip(row, ip))
+
+
+class TestIsLbFip(test_base.TestCase):
+    def test_is_lb_fip(self):
+        ip = 'ip'
+        row = test_utils.create_row(
+            external_ids={constants.OVN_LB_VIP_FIP_EXT_ID_KEY: ip})
+
+        self.assertTrue(utils.is_lb_fip(row, ip))
