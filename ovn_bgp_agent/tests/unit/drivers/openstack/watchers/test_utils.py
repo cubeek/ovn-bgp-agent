@@ -13,6 +13,7 @@
 #    License for the specific language governing permissions and limitations
 #    under the License.
 
+from ovn_bgp_agent import constants
 from ovn_bgp_agent.drivers.openstack.watchers import utils
 from ovn_bgp_agent.tests import base as test_base
 from ovn_bgp_agent.tests import utils as test_utils
@@ -56,3 +57,46 @@ class TestGetFromExternalIds(test_base.TestCase):
         row = test_utils.create_row(external_ids={})
 
         self.assertIsNone(utils.get_from_external_ids(row, 'key'))
+
+
+class TestGetRouterFromExternalIds(test_base.TestCase):
+    def test_router_present(self):
+        expected_router = 'foo'
+        r_ext_id = 'neutron-{:s}'.format(expected_router)
+        row = test_utils.create_row(
+            external_ids={
+                constants.OVN_LB_LR_REF_EXT_ID_KEY: r_ext_id})
+        router = utils.get_router_from_external_ids(row)
+
+        self.assertEqual(expected_router, router)
+
+    def test_router_present_custom_field(self):
+        expected_router = 'foo'
+        custom_field = 'bar'
+        r_ext_id = 'neutron-{:s}'.format(expected_router)
+        row = test_utils.create_row(
+            external_ids={custom_field: r_ext_id})
+        router = utils.get_router_from_external_ids(row, key=custom_field)
+
+        self.assertEqual(expected_router, router)
+
+    def test_router_missing(self):
+        row = test_utils.create_row(external_ids={})
+        router = utils.get_router_from_external_ids(row)
+
+        self.assertIsNone(router)
+
+    def test_router_missing_custom_field(self):
+        row = test_utils.create_row(external_ids={})
+        router = utils.get_router_from_external_ids(row, key='foo')
+
+        self.assertIsNone(router)
+
+    def test_router_bad_name(self):
+        expected_router = 'foo'
+        row = test_utils.create_row(
+            external_ids={
+                constants.OVN_LB_LR_REF_EXT_ID_KEY: expected_router})
+        router = utils.get_router_from_external_ids(row)
+
+        self.assertEqual(expected_router, router)

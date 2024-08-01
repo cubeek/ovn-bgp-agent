@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from ovn_bgp_agent import constants
+
 
 def has_ip_address_defined(address):
     return ' ' in address.strip()
@@ -21,4 +23,13 @@ def get_from_external_ids(row, key):
     try:
         return row.external_ids[key]
     except (AttributeError, KeyError):
+        pass
+
+
+def get_router_from_external_ids(row, key=constants.OVN_LB_LR_REF_EXT_ID_KEY):
+    router_name = get_from_external_ids(row, key)
+
+    try:
+        return router_name.replace('neutron-', "", 1)
+    except AttributeError:
         pass
