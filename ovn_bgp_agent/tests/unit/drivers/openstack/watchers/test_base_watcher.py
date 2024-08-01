@@ -21,11 +21,6 @@ from ovn_bgp_agent.tests import base as test_base
 from ovn_bgp_agent.tests import utils
 
 
-class FakeLogicalSwitchChassisEvent(base_watcher.LogicalSwitchChassisEvent):
-    def run(self):
-        pass
-
-
 class FakeLSPChassisEvent(base_watcher.LSPChassisEvent):
     def run(self):
         pass
