@@ -31,6 +31,7 @@ from ovn_bgp_agent import constants
 from ovn_bgp_agent.drivers.openstack.utils import driver_utils
 from ovn_bgp_agent import exceptions
 from ovn_bgp_agent.utils import helpers
+from ovn_bgp_agent.drivers.openstack import nb_exceptions
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -531,6 +532,60 @@ class OvsdbNbOvnIdl(nb_impl_idl.OvnNbApiIdlImpl, Backend):
     def get_router(self, router):
         router_name = 'neutron-' + router
         return self.lr_get(router_name).execute(check_error=True)
+
+    def get_distributed_flag(self):
+        """Return distributed flag set by Neutron.
+
+        The method returns True by default if the flag is not set in Neutron.
+        """
+        nb_global_ext_ids = self.db_get(
+            'NB_Global', '.', 'external_ids').execute(check_error=True)
+        distributed = nb_global_ext_ids.get(
+            constants.OVN_FIP_DISTRIBUTED, "True")
+        return True if distributed == "True" else False
+
+    def get_gateway_lrp(self, nat):
+        try:
+            return nat.gateway_port
+        except IndexError:
+            nb_exceptions.NATNotFound("Port %s has no NAT entry" % lsp.name)
+
+    def get_chassis_hosting_crlrp(self, nat):
+        gateway_lrp = self.get_gateway_lrp(nat)
+        try:
+            return gateway_lrp[0].status[constants.OVN_STATUS_CHASSIS]
+        except KeyError:
+            # TODO(jlibosva): Custom exception
+            raise Exception("BB")
+        except IndexError:
+            raise Exception("CC")
+
+    def get_lsps_for_gw_chassis(self, chassis_id):
+        ports = []
+        lrps = self.db_find_rows(
+                'Logical_Router_Port', ('status', '=',
+                    {constants.OVN_STATUS_CHASSIS:
+                        chassis_id})).execute(check_error=True) or []
+        LOG.debug("XXX lrps: %s", lrps)
+        for lrp in lrps:
+            nats = self.db_find_rows(
+                'NAT', ('type', '=', constants.OVN_DNAT_AND_SNAT),
+                ('gateway_port', '=', lrp.uuid)).execute(check_error=True) or []
+            LOG.debug("XXX nat: %s", nats)
+            for nat in nats:
+                try:
+                    lsp = self.lsp_get(nat.logical_port[0]).execute(check_error=True)
+                except IndexError:
+                    continue
+                try:
+                    ls_name = "neutron-{}".format(
+                        nat.external_ids[constants.OVN_FIP_NET_EXT_ID_KEY])
+                except KeyError:
+                    continue
+                if lsp:
+                    ports.append((nat.external_ip, lrp.mac, ls_name, lsp))
+        LOG.debug("XXX ports: %s", ports)
+        return ports
 
 
 class OvsdbSbOvnIdl(sb_impl_idl.OvnSbApiIdlImpl, Backend):
