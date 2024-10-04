@@ -28,6 +28,7 @@ from ovsdbapp.schema.ovn_northbound import impl_idl as nb_impl_idl
 from ovsdbapp.schema.ovn_southbound import impl_idl as sb_impl_idl
 
 from ovn_bgp_agent import constants
+from ovn_bgp_agent.drivers.openstack import nb_exceptions
 from ovn_bgp_agent.drivers.openstack.utils import driver_utils
 from ovn_bgp_agent import exceptions
 from ovn_bgp_agent.utils import helpers
@@ -375,6 +376,44 @@ class StaticMACBindingDelCommand(command.BaseCommand):
                 "exist" % (self.port, self.ip))
 
 
+class GetLSPsForGwChassisCommand(command.ReadOnlyCommand):
+    """Get all LSPs associated with a NAT entry (FIPs) which its CR-LRP ports
+    (gateway ports) are hosted on the given chassis.
+
+    The resulted format is in tuple that can be consumed by the `wire` module.
+    """
+    def __init__(self, api, chassis_id):
+        super().__init__(api)
+        self.chassis_id = chassis_id
+
+    def run_idl(self, txn):
+        self.result = []
+        for nat in self.api.tables['NAT'].rows.values():
+            if nat.type != 'dnat_and_snat':
+                continue
+
+            try:
+                gw_chassis = nat.gateway_port[0].status.get(
+                    constants.OVN_STATUS_CHASSIS)
+            except IndexError:
+                continue
+
+            if gw_chassis == self.chassis_id:
+                ls_name = "neutron-{}".format(
+                    nat.external_ids[constants.OVN_FIP_NET_EXT_ID_KEY])
+                try:
+                    lsp = self.api.lookup(
+                        'Logical_Switch_Port', nat.logical_port[0])
+                except IndexError:
+                    LOG.debug("NAT %s does not have a logical_port set", nat)
+                    continue
+                self.result.append(
+                    (nat.external_ip,
+                     nat.gateway_port[0].mac,
+                     ls_name,
+                     lsp))
+
+
 class OvsdbNbOvnIdl(nb_impl_idl.OvnNbApiIdlImpl, Backend):
     def __init__(self, connection):
         super(OvsdbNbOvnIdl, self).__init__(connection)
@@ -531,6 +570,39 @@ class OvsdbNbOvnIdl(nb_impl_idl.OvnNbApiIdlImpl, Backend):
     def get_router(self, router):
         router_name = 'neutron-' + router
         return self.lr_get(router_name).execute(check_error=True)
+
+    def get_distributed_flag(self):
+        """Return distributed flag set by Neutron.
+
+        The method returns True by default if the flag is not set in Neutron.
+        """
+        nb_global_ext_ids = self.db_get(
+            'NB_Global', '.', 'external_ids').execute(check_error=True)
+        distributed = nb_global_ext_ids.get(
+            constants.OVN_FIP_DISTRIBUTED, "True")
+        return True if distributed == "True" else False
+
+    def get_gateway_lrp(self, nat):
+        try:
+            return nat.gateway_port[0]
+        except IndexError:
+            nb_exceptions.NATNotFound("NAT entry %s has no gateway port" %
+                                      nat.name)
+
+    def get_chassis_hosting_crlrp(self, nat):
+        gateway_lrp = self.get_gateway_lrp(nat)
+        try:
+            return gateway_lrp.status[constants.OVN_STATUS_CHASSIS]
+        except KeyError:
+            # TODO(jlibosva): Custom exception
+            raise Exception("BB")
+
+    def get_nats_by_lrp(self, lrp):
+        return self.db_find_rows(
+            'NAT',
+            ('gateway_port', '=', lrp.uuid),
+            ('type', '=', constants.OVN_DNAT_AND_SNAT)
+        ).execute(check_error=True)
 
 
 class OvsdbSbOvnIdl(sb_impl_idl.OvnSbApiIdlImpl, Backend):
