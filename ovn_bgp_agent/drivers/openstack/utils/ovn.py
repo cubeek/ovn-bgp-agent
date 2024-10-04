@@ -31,6 +31,7 @@ from ovn_bgp_agent import constants
 from ovn_bgp_agent.drivers.openstack.utils import driver_utils
 from ovn_bgp_agent import exceptions
 from ovn_bgp_agent.utils import helpers
+from ovn_bgp_agent.drivers.openstack import nb_exceptions
 
 CONF = cfg.CONF
 LOG = logging.getLogger(__name__)
@@ -531,6 +532,33 @@ class OvsdbNbOvnIdl(nb_impl_idl.OvnNbApiIdlImpl, Backend):
     def get_router(self, router):
         router_name = 'neutron-' + router
         return self.lr_get(router_name).execute(check_error=True)
+
+    def get_distributed_flag(self):
+        """Return distributed flag set by Neutron.
+
+        The method returns True by default if the flag is not set in Neutron.
+        """
+        nb_global_ext_ids = self.db_get(
+            'NB_Global', '.', 'external_ids').execute(check_error=True)
+        distributed = nb_global_ext_ids.get(
+            constants.OVN_FIP_DISTRIBUTED, "True")
+        return True if distributed == "True" else False
+
+    def get_gateway_lrp(self, nat):
+        try:
+            return nat.gateway_port
+        except IndexError:
+            nb_exceptions.NATNotFound("Port %s has no NAT entry" % lsp.name)
+
+    def get_chassis_hosting_crlrp(self, nat):
+        gateway_lrp = self.get_gateway_lrp(nat)
+        try:
+            return gateway_lrp[0].status['hosting-chassis']
+        except KeyError:
+            # TODO(jlibosva): Custom exception
+            raise Exception("BB")
+        except IndexError:
+            raise Exception("CC")
 
 
 class OvsdbSbOvnIdl(sb_impl_idl.OvnSbApiIdlImpl, Backend):

@@ -864,7 +864,9 @@ class OVNPFDeleteEvent(OVNPFBaseEvent):
             self.agent.withdraw_ovn_pf_lb_fip(row)
 
 
-class NATMACAddedEvent(base_watcher.DnatSnatUpdatedBaseEvent):
+class NATMACAddedEvent(base_watcher.DnatSnatBaseEvent):
+    events = (base_watcher.DnatSnatBaseEvent.ROW_UPDATE,)
+
     def match_fn(self, event, row, old):
         try:
             lsp_id = row.logical_port[0]
@@ -919,3 +921,78 @@ class NATMACAddedEvent(base_watcher.DnatSnatUpdatedBaseEvent):
         with _SYNC_STATE_LOCK.read_lock():
             self.agent.expose_fip(
                 row.external_ip, row.external_mac[0], ls_name, lsp)
+
+
+class ExposeFIPOnCRLRP(base_watcher.FipOnCRLRPBaseEvent):
+    events = (base_watcher.DnatSnatBaseEvent.ROW_CREATE,)
+
+    def run(self, event, row, old):
+        net_id = row.external_ids[constants.OVN_FIP_NET_EXT_ID_KEY]
+        ls_name = "neutron-{}".format(net_id)
+
+        try:
+            mac = self.agent.nb_idl.get_gateway_lrp(row)[0].mac
+        except IndexError:
+            LOG.error("Gateway port for NAT entry %s has no MAC address set",
+                      row.uuid)
+            return
+
+        # row has the logical port and its in the db, that was checked in
+        # match_fn
+        lsp = self.agent.nb_idl.lsp_get(
+            row.logical_port[0]).execute(check_error=True)
+
+        with _SYNC_STATE_LOCK.read_lock():
+            self.agent.expose_fip(row.external_ip, mac, ls_name, lsp)
+
+
+class WithdrawFIPOnCRLRP(base_watcher.FipOnCRLRPBaseEvent):
+    events = (base_watcher.DnatSnatBaseEvent.ROW_DELETE,)
+
+    def run(self, event, row, old):
+        lsp = self.agent.nb_idl.lsp_get(row.logical_port[0]).execute()
+        with _SYNC_STATE_LOCK.read_lock():
+            self.agent.withdraw_fip(row.external_ip, lsp)
+
+
+class DistributedFlagChangedEvent(base_watcher.Event):
+    def __init__(self, bgp_agent):
+        table = 'NB_Global'
+        events = (self.ROW_UPDATE,)
+        super().__init__(bgp_agent, events, table)
+        self.event_name = self.__class__.__name__
+
+    def match_fn(self, event, row, old):
+        if not row.external_ids.get(constants.OVN_FIP_DISTRIBUTED):
+            return False
+        try:
+            if (old.external_ids.get(constants.OVN_FIP_DISTRIBUTED) ==
+                    row.external_ids[constants.OVN_FIP_DISTRIBUTED]):
+                return False
+        except AttributeError:
+            return False
+
+        return True
+
+    def switch_events(self, to_watch, to_unwatch):
+        self.agent.nb_idl.ovsdb_connection.idl.notify_handler.unwatch_events(
+            to_unwatch)
+        self.agent.nb_idl.ovsdb_connection.idl.notify_handler.watch_events(
+            to_watch)
+
+    def run(self, event, row, old):
+        if row.external_ids.get(constants.OVN_FIP_DISTRIBUTED) == "True":
+            self.agent.distributed = True
+            self.switch_events(
+                self.agent._distributed_events,
+                self.agent._non_distributed_events)
+        elif row.external_ids.get(constants.OVN_FIP_DISTRIBUTED) == "False":
+            self.agent.distributed = False
+            self.switch_events(
+                self.agent._non_distributed_events,
+                self.agent._distributed_events)
+        else:
+            return
+
+        self.agent.sync()
+        self.agent.frr_sync()

@@ -1598,7 +1598,7 @@ class TestNATMACAddedEvent(test_base.TestCase):
         self.event = nb_bgp_watcher.NATMACAddedEvent(
             self.agent)
         self.nat_entry = utils.create_row(
-            _uuid='uuid',
+            uuid='uuid',
             logical_port=['port-id'],
             external_ids={constants.OVN_FIP_NET_EXT_ID_KEY: 'net-id'},
             external_ip='ext-ip',

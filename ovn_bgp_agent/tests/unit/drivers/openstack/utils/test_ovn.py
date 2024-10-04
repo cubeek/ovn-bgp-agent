@@ -235,6 +235,12 @@ class TestOvsdbNbOvnIdl(test_base.TestCase):
         self.nb_idl.db_find_rows.assert_called_once_with(
             'Load_Balancer', ('vips', '!=', {}))
 
+#    def test_get_distributed_flag_unset(self):
+#    def test_get_distributed_flag_true(self):
+#    
+#    def test_get_distributed_flag_false(self):
+#    def test_get_distributed_flag_garbage(self):
+
 
 class TestOvsdbSbOvnIdl(test_base.TestCase):
 
