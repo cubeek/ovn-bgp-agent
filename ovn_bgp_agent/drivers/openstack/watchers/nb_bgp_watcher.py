@@ -156,195 +156,6 @@ class LogicalSwitchPortProviderDeleteEvent(base_watcher.LSPChassisEvent):
             self.agent.withdraw_ip(ips, ips_info)
 
 
-class LogicalSwitchPortFIPCreateEvent(base_watcher.LSPChassisEvent):
-    '''Floating IP create events based on the LogicalSwitchPort
-
-    The LSP has information about the host is should be exposed to, which
-    adds a bit of complexity in the event match, but saves a lot of queries
-    to the OVN NB DB.
-
-    Should trigger on:
-    - floating ip was attached to a lsp (external_ids.neutron:port_fip
-                                         appeared with information)
-    - port with floating ip attached was set to up (old.up = false and
-                                                    row.up = true)
-
-    During a migration of a lsp, the following events happen (chronologically):
-    1. options.requested_chassis is updated (now a comma separated list)
-       we also get external_ids, but only revision_number is updated.
-    2. update with only external_ids update (with only a revnum update)
-    3. port is set down (by ovn-controller on source host)
-    4. update with only external_ids update (with only a revnum update)
-    5. external_ids update (neutron:host_id is removed)
-    6. options.requested_chassis is updated (with only dest host)
-       and external_ids update which now includes neutron:host_id again
-    7. port is set up (by ovn-controller on dest host)
-    8 and 9 are only a revnum update in the external_ids
-
-    So for migration flow we are only interested in event 7.
-    Otherwise the floating ip would be added upon event 2, deleted with
-        event 3 and re-added with event 7.
-
-    For the live migration of a VIP (floating ip attached to virtual port),
-    the following events happen:
-    1. port is set down (by ovn-controller on source host)
-    2. external_ids update (neutron:host_id is removed)
-    3. port is set up (by ovn-controller on dest host)
-    4. external_ids update (neutron:host_id is added)
-
-    In this case we only need to catch event 4.
-    '''
-    def __init__(self, bgp_agent):
-        events = (self.ROW_UPDATE,)
-        super(LogicalSwitchPortFIPCreateEvent, self).__init__(
-            bgp_agent, events)
-
-    def match_fn(self, event, row, old):
-        if row.type not in [constants.OVN_VM_VIF_PORT_TYPE,
-                            constants.OVN_VIRTUAL_VIF_PORT_TYPE]:
-            return
-        try:
-            # single and dual-stack format
-            if not port_utils.has_ip_address_defined(row.addresses[0]):
-                return False
-
-            current_chassis = self._get_chassis(row)
-            current_port_fip = row.external_ids.get(
-                constants.OVN_FIP_EXT_ID_KEY)
-            if (current_chassis != self.agent.chassis or
-                    not bool(row.up[0]) or not current_port_fip):
-                # Port is not bound on this host, is down or does not have a
-                # floating ip attached.
-                return False
-
-            if hasattr(old, 'up') and not bool(old.up[0]):
-                # Port changed up, which happens when the port is picked up
-                # on this host by the ovn-controller during migrations
-                return True
-
-            old_port_fip = getattr(old, 'external_ids', {}).get(
-                constants.OVN_FIP_EXT_ID_KEY)
-            if old_port_fip == current_port_fip:
-                # Only if the floating ip has changed (for example from empty
-                # to something else) we need to process this update.
-                # If nothing else changed in the external_ids, we do not care
-                # as it would just cause unnecessary events during migrations.
-                # Only case we are interested in is if the chassis has changed
-                # with this event.
-                # (see the docstring of this class)
-                old_chassis = self._get_chassis(old)
-                return old_chassis != current_chassis
-
-            # Check if the current port_fip has not been exposed yet
-            return not self.agent.is_ip_exposed(
-                common_utils.get_from_external_ids(
-                    row, constants.OVN_LS_NAME_EXT_ID_KEY),
-                current_port_fip)
-
-        except (IndexError, AttributeError):
-            return False
-
-    def _run(self, event, row, old):
-        try:
-            external_ip, external_mac, ls_name = (
-                self.agent.get_port_external_ip_and_ls(row.name))
-        except nb_exceptions.NATNotFound as e:
-            LOG.debug("Logical Switch Port %s does not have all data required"
-                      " in its NAT entry: %s", row.name, e)
-            return
-
-        with _SYNC_STATE_LOCK.read_lock():
-            self.agent.expose_fip(external_ip, external_mac, ls_name, row)
-
-
-class LogicalSwitchPortFIPDeleteEvent(base_watcher.LSPChassisEvent):
-    '''Floating IP delete events based on the LogicalSwitchPort
-
-    The LSP has information about the host is should be exposed to, which
-    adds a bit of complexity in the event match, but saves a lot of queries
-    to the OVN NB DB.
-
-    Should trigger on:
-    - lsp deleted and bound on this host
-    - floating ip removed from a lsp (external_ids.neutron:port_fip
-                                      disappeared with information)
-    - port with floating ip attached was set to down (old.up = true and
-                                                      row.up = false)
-    - current floating ip is not the same as old floating ip
-    '''
-    def __init__(self, bgp_agent):
-        events = (self.ROW_UPDATE, self.ROW_DELETE,)
-        super(LogicalSwitchPortFIPDeleteEvent, self).__init__(
-            bgp_agent, events)
-
-    def match_fn(self, event, row, old):
-        '''Match port deletes or port downs or migrations or fip changes
-
-        1. [DELETE] Port has been deleted, and we're hosting it
-        2. [UPDATE] Port went down, withdraw if we announced it
-        3. [UPDATE] Floating IP has been disassociated (or re-associated
-                    with another floating ip)
-        4. [UPDATE] Port has been migrated away and we're hosting it
-        '''
-        if row.type not in [constants.OVN_VM_VIF_PORT_TYPE,
-                            constants.OVN_VIRTUAL_VIF_PORT_TYPE]:
-            return
-        try:
-            # single and dual-stack format
-            if not port_utils.has_ip_address_defined(row.addresses[0]):
-                return False
-
-            current_port_fip = port_utils.get_fip(row)
-            old_port_fip = port_utils.get_fip(old)
-            if not current_port_fip and not old_port_fip:
-                # This port is not a floating ip update
-                return False
-
-            logical_switch = common_utils.get_from_external_ids(
-                row, constants.OVN_LS_NAME_EXT_ID_KEY)
-            is_exposed = self.agent.is_ip_exposed(logical_switch,
-                                                  old_port_fip or
-                                                  current_port_fip)
-            if not is_exposed:
-                # already deleted or not exposed.
-                return False
-
-            # From here on we know we are exposing a FIP (either old or
-            #                                             current)
-
-            if event == self.ROW_DELETE:
-                # Port is deleting
-                return True
-
-            if (hasattr(old, 'up') and bool(old.up[0]) and  # port was up
-                    not bool(row.up[0])):                   # is now down
-                return True
-
-            if old_port_fip is not None and current_port_fip != old_port_fip:
-                # fip has changed, we should remove the old one.
-                return True
-
-            # If we reach here, just check if host changed
-            current_chassis = self._get_chassis(row)
-            return current_chassis != self.agent.chassis
-
-        except (IndexError, AttributeError):
-            return False
-
-    def _run(self, event, row, old):
-        # First check to remove the fip provided in old (since this might
-        # have been updated)
-        fip = port_utils.get_fip(old)
-        if not fip:
-            # Remove the fip provided in the current row, probably a
-            # disassociate of the fip (or a down or a move)
-            fip = port_utils.get_fip(row)
-        if not fip:
-            return
-        with _SYNC_STATE_LOCK.read_lock():
-            self.agent.withdraw_fip(fip, row)
-
-
 class LogicalSwitchUpdateEvent(base_watcher.LogicalSwitchChassisEvent):
     '''Event to trigger on logical switch vrf config updates'''
     def __init__(self, bgp_agent):
@@ -879,39 +690,25 @@ class OVNPFDeleteEvent(OVNPFBaseEvent):
             self.agent.withdraw_ovn_pf_lb_fip(row)
 
 
-class NATMACAddedEvent(base_watcher.DnatSnatBaseEvent):
-    events = (base_watcher.DnatSnatBaseEvent.ROW_UPDATE,)
+class FIPCreatedEvent(base_watcher.DnatSnatBaseEvent):
+    events = (base_watcher.DnatSnatBaseEvent.ROW_UPDATE,
+              base_watcher.DnatSnatBaseEvent.ROW_CREATE)
 
     def match_fn(self, event, row, old):
-        try:
-            lsp_id = row.logical_port[0]
-        except IndexError:
-            LOG.error("NAT entry %s has no logical port set.", row.uuid)
-            return False
-
-        lsp = self.agent.nb_idl.lsp_get(lsp_id).execute()
-
-        if lsp is None:
-            LOG.error("Logical Switch Port %(lsp)s for NAT entry %(nat)s "
-                      "was not found in OVN NB DB.", {
-                          'lsp': lsp_id,
-                          'nat': row.uuid})
-            return False
-
-        if lsp.type != constants.OVN_VM_VIF_PORT_TYPE:
-            return False
-
-        try:
-            if lsp.options['requested-chassis'] != self.agent.chassis:
+        if event == self.ROW_CREATE:
+            # Check if external_mac is set meaning the port is already UP
+            if not row.external_mac:
                 return False
-        except KeyError:
+
+        if not super().match_fn(event, row, old):
+            LOG.debug("XXX super not matched")
             return False
 
-        try:
-            if old.external_mac and old.external_mac[0] == row.external_mac[0]:
+        if event == self.ROW_UPDATE:
+            if not (hasattr(old, 'external_mac') or
+                    hasattr(old, 'logical_port')):
+                LOG.debug("XXX dat update not for me")
                 return False
-        except (AttributeError, IndexError):
-            return False
 
         # This is required to be able to expose the FIP, there is no point in
         # continuing if the external_id is not set
@@ -936,6 +733,46 @@ class NATMACAddedEvent(base_watcher.DnatSnatBaseEvent):
         with _SYNC_STATE_LOCK.read_lock():
             self.agent.expose_fip(
                 row.external_ip, row.external_mac[0], ls_name, lsp)
+
+
+class FIPDeletedEvent(base_watcher.DnatSnatBaseEvent):
+    events = (base_watcher.DnatSnatBaseEvent.ROW_UPDATE,
+              base_watcher.DnatSnatBaseEvent.ROW_DELETE)
+
+    def match_fn(self, event, row, old):
+        if not super().match_fn(event, row, old):
+            return False
+
+        if not row.external_ip:
+            LOG.error("NAT entry %s does not have external_ip set", row.uuid)
+            return False
+
+        if event == self.ROW_UPDATE:
+            try:
+                old_lsp = self.agent.nb_idl.lsp_get(
+                    old.logical_port[0]).execute()
+            except AttributeError:
+                # does not have logical_port updated
+                return False
+
+            # The old FIP was not on this chassis
+            if old_lsp['requested-chassis'] != self.agent.chassis:
+                return False
+
+            new_lsp = self.agent.nb_idl.lsp_get(
+                old.logical_port[0]).execute()
+            # The FIP didn't move, we don't need to do anything
+            if old_lsp['requested-chassis'] == new_lsp['requested-chassis']:
+                return False
+
+        return True
+
+    def run(self, event, row, old):
+        lsp = self.agent.nb_idl.lsp_get(row.logical_port[0]).execute()
+        with _SYNC_STATE_LOCK.read_lock():
+            LOG.debug("XXX withdrawing %s from %s", row.external_ip,
+                      lsp.addresses[0].split(' ')[1])
+            self.agent.withdraw_fip(row.external_ip, lsp)
 
 
 class ExposeFIPOnCRLRP(base_watcher.FipOnCRLRPBaseEvent):

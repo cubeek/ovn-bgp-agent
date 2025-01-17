@@ -113,6 +113,33 @@ class DnatSnatBaseEvent(Event):
             table,
             (('type', '=', 'dnat_and_snat'),))
 
+    def match_fn(self, event, row, old):
+        try:
+            lsp_id = row.logical_port[0]
+        except IndexError:
+            LOG.error("NAT entry %s has no logical port set.", row.uuid)
+            return False
+
+        lsp = self.agent.nb_idl.lsp_get(lsp_id).execute()
+
+        if lsp is None:
+            LOG.error("Logical Switch Port %(lsp)s for NAT entry %(nat)s "
+                      "was not found in OVN NB DB.", {
+                          'lsp': lsp_id,
+                          'nat': row.uuid})
+            return False
+
+        if lsp.type not in [constants.OVN_VM_VIF_PORT_TYPE,
+                            constants.OVN_VIRTUAL_VIF_PORT_TYPE]:
+            return False
+
+        try:
+            if lsp.options['requested-chassis'] != self.agent.chassis:
+                return False
+        except KeyError:
+            return False
+
+        return True
 
 class FipOnCRLRPBaseEvent(DnatSnatBaseEvent):
     """Base class for NAT event.

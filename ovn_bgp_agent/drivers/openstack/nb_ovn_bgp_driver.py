@@ -125,9 +125,8 @@ class NBOVNBGPDriver(driver_api.AgentDriverBase):
 
         self.__d_events = {
             True: [
-                watcher.NATMACAddedEvent(self),
-                watcher.LogicalSwitchPortFIPCreateEvent(self),
-                watcher.LogicalSwitchPortFIPDeleteEvent(self),
+                watcher.FIPCreatedEvent(self),
+                watcher.FIPDeletedEvent(self),
             ],
             False: [
                 watcher.ExposeFIPOnCRLRP(self),

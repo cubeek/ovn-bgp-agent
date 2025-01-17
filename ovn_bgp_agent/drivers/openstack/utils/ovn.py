@@ -20,6 +20,7 @@ from ovsdbapp.backend.ovs_idl import command
 from ovsdbapp.backend.ovs_idl import connection
 from ovsdbapp.backend.ovs_idl import idlutils
 from ovsdbapp.backend.ovs_idl import rowview
+from ovsdbapp.backend.ovs_idl import vlog
 from ovsdbapp import event
 from ovsdbapp.schema.ovn_northbound import impl_idl as nb_impl_idl
 from ovsdbapp.schema.ovn_southbound import impl_idl as sb_impl_idl
@@ -54,6 +55,7 @@ class OvnNbIdl(OvnIdl):
 
     def __init__(self, connection_string, events=None, tables=None,
                  leader_only=False):
+        vlog.use_python_logger(max_level=vlog.DEBUG)
         if connection_string.startswith("ssl"):
             self._check_and_set_ssl_files(self.SCHEMA)
         helper = self._get_ovsdb_helper(connection_string)
