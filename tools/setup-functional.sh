@@ -1,5 +1,10 @@
 #!/bin/bash -xe
 
+cur_dir=$(dirname $0)
+source $cur_dir/../devstack/lib/ovn-bgp-agent
+
+install_vrf_kernel_module_if_needed
+
 # This is a copy from the ovsdbapp projects
 
 OVN_BRANCH=${OVN_BRANCH:-main}
